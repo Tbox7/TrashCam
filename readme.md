@@ -6,6 +6,7 @@ You can use this application to help you accurately discard of your garbage. Usi
 TrashCam is a Python desktop app that uses your webcam to analyze only the item inside a green on-screen box, continuously predicts the item with google/vit-base-patch16-224, and when you click Classify it predicts the disposal category (recycle, compost, or landfill) from the ROI image using openai/clip-vit-large-patch14 (or, if you manually type an item name, it uses all-mpnet-base-v2 from SentenceTransformers as a text-similarity fallback), then lets you choose Next (Save) to log the confirmed result to a local SQLite database or Redo to discard it, with a Reports tab that summarizes category totals between two selected dates.
 ## Schema
 <img width="3740" height="1727" alt="Schematics" src="https://github.com/user-attachments/assets/061ce503-77ee-4b92-9171-8a208bd6ef8c" />
+
 ## Challenges we ran into
 The main challenge we ran into was balancing computational power and accurate results. It was a lot of trial and error to see which model was both light and accurate. We ran into problems where models that were easy to run had a large number of incorrect classifications and large accurate models took a long time to produce results. Ultimately, we decided to use openai's clip model, as it balances being both lightweight and accurate.  
 ## Accomplishments that we're proud of
