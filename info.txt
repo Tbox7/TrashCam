@@ -1,81 +1,109 @@
-TrashCam - Project Notes
-========================
+TrashCam - Project Notes (Updated)
+==================================
 
 What this app is
 ----------------
-TrashCam is a simple desktop prototype built in Python 3.11. It uses a webcam to:
+TrashCam is a Python 3.11 desktop prototype that uses a webcam and ML models to:
 
-1) Classify what item is visible in the camera frame.
-2) Decide which disposal stream is most likely:
+1) Detect what item is currently in view (live).
+2) Classify disposal category as:
    - recycle
    - compost
    - landfill
-3) Save each event to a local SQLite database.
-4) Show date-range totals in a report tab.
+3) Log confirmed results to a local SQLite database.
+4) Report totals by date range in a Reports tab.
+
+This is a practical prototype for guidance and tracking, not a municipal compliance system.
+
+
+Current UX and behavior
+-----------------------
+Classifier tab:
+- A green overlay box is drawn on the camera feed.
+- User instruction asks the user to fill that green box with the item.
+- Only the pixels inside the green ROI are used for model inference.
+- Right panel continuously shows:
+  - Current item (live prediction)
+  - Stable item (prediction that has repeated consistently)
+- User can type a manual item name if vision is uncertain.
+
+Action flow:
+1) User positions item in green box.
+2) User clicks Classify.
+3) App shows predicted disposal category and confidence.
+4) User clicks:
+   - Redo: discard result and log nothing
+   - Next (Save): commit result to SQLite
+
+Important:
+- The app no longer saves snapshot image files.
+- Logging only happens when user explicitly clicks Next (Save).
 
 
 Why these libraries were chosen
 -------------------------------
 tkinter
-- Built into Python and easy to run on Windows without extra UI frameworks.
-- Good enough for a lightweight two-tab desktop app.
+- Built into Python and easy to run on Windows.
+- Sufficient for a lightweight two-tab desktop UI.
 
 opencv-python (cv2)
-- Reliable webcam capture and frame handling.
-- Fast enough for periodic image capture in a local desktop app.
+- Handles webcam capture and ROI frame processing.
+- Fast and reliable for local camera pipelines.
 
 Pillow (PIL)
-- Converts OpenCV/Numpy images into formats Tkinter can display.
-- Standard utility for image interoperability.
+- Converts OpenCV/Numpy images into Tkinter-displayable images.
 
 transformers + torch + torchvision
-- Provides pre-trained models with minimal setup.
-- Lets us avoid hand-labeling and hardcoded item rules.
-- Torch is required backend for many Hugging Face models.
+- Provides pre-trained vision models and CLIP zero-shot image classification.
+- Allows model-driven routing without hardcoded item->category rules.
+
+sentence-transformers
+- Adds strong text embedding support for manual typed item fallback.
 
 sqlite3
-- Built into Python.
-- Zero-config local database that persists between app runs.
-- Perfect for timestamped event logs and basic report queries.
+- Built into Python and requires no external DB server.
+- Good fit for local event logging and simple reports.
 
 numpy
-- Common image array dependency used by OpenCV and model pipelines.
+- Core array layer for OpenCV and ML pipeline handling.
 
 
-Current model pipeline
-----------------------
-The app uses a two-stage, pre-trained pipeline:
-
-Stage 1: Image classification
+Current model stack
+-------------------
+1) Live item recognition model
 - Model: google/vit-base-patch16-224
-- Input: captured webcam frame
-- Output: top predicted item label (with confidence)
+- Task: image-classification
+- Use: display "Current item" / "Stable item" in UI
 
-Stage 2: Disposal category routing
-- Model: facebook/bart-large-mnli (zero-shot classification)
-- Input: text prompt containing predicted item label
-- Candidate labels: recycle, compost, landfill
-- Output: best category (with confidence)
+2) Disposal category from image ROI
+- Model: openai/clip-vit-large-patch14
+- Task: zero-shot-image-classification
+- Input: cropped green-box ROI
+- Output: top class among recycle / compost / landfill prompts
 
-Why two stages:
-- Vision model is best at identifying "what" the item looks like.
-- Zero-shot text model is used for "where should this generally go" without a hardcoded map.
+3) Manual text fallback (when user types item name)
+- Model: all-mpnet-base-v2 (SentenceTransformer)
+- Method: embedding similarity against category descriptions
+- Output: best disposal category and similarity score
+
+Why this design:
+- Image-to-category classification is now based on the image itself for non-manual flow.
+- Manual text fallback exists only when user explicitly types an item.
+- This avoids the previous weak text-only routing from auto-detected labels.
 
 
-Data flow in the app
---------------------
-1) User opens app and sees live camera preview in the Classifier tab.
-2) User clicks "Capture + Classify".
-3) Frame is sent to image classifier -> predicted item.
-4) Predicted item text is sent to zero-shot router -> disposal category.
-5) Snapshot is saved to /snapshots.
-6) Event is inserted into trashcam.db with:
-   - timestamp
-   - item label
-   - disposal category
-   - confidence
-   - image path
-7) Reports tab can query totals between start date and end date.
+Data flow
+---------
+1) App starts camera feed and draws green ROI overlay.
+2) ROI is sampled periodically for live item predictions.
+3) User clicks Classify:
+   - If manual item text is provided -> text embedding categorization
+   - Otherwise -> CLIP zero-shot image categorization on ROI
+4) Result is held as pending.
+5) User decides:
+   - Redo -> clear pending result, do not save
+   - Next (Save) -> insert one row into SQLite
+6) Reports tab queries aggregate counts by disposal_type and date range.
 
 
 Database design
@@ -86,59 +114,55 @@ Table: trash_events
 - item_label (text)
 - disposal_type (text: recycle/compost/landfill)
 - confidence (real)
-- image_path (text, optional)
+- image_path (text, optional; currently stored as NULL by this app flow)
 
-Reporting query
-- Aggregates COUNT(*) grouped by disposal_type
-- Filters rows where event_time is between selected date range
+Reporting query:
+- COUNT(*) grouped by disposal_type
+- Filtered by event_time between selected start/end dates
 
 
 Use cases
 ---------
-- Educational demos for waste-sorting ideas.
-- Household habit tracking over time.
-- Basic prototype for a smart-bin UX.
-- Classroom/project showcase combining CV + NLP + local analytics.
+- Educational waste-sorting demos.
+- Personal or household waste habit tracking.
+- Prototype UX for smart sorting workflows.
+- Hybrid CV+NLP local app examples for students/projects.
 
 
-Shortcomings and risks
-----------------------
-1) Not compliance-grade
-- Waste rules vary by city/country and material details.
-- This app gives general guidance, not legal/local disposal instructions.
+Shortcomings and known limits
+-----------------------------
+1) Not policy-aware
+- Real disposal rules vary by city and facility.
+- App predictions may conflict with local recycling rules.
 
-2) Model mismatch
-- ViT label taxonomy is general-purpose image classes, not waste-specific classes.
-- Some items may be identified too broadly or incorrectly.
+2) Zero-shot limitations
+- CLIP-style zero-shot categories are prompt-sensitive.
+- Similar-looking materials can still be misclassified.
 
-3) Zero-shot uncertainty
-- Routing model reasons from text and may produce plausible but wrong category choices.
-- Confidence score is not a guarantee of correctness.
+3) Camera dependence
+- Lighting, blur, occlusion, reflections, and background clutter affect accuracy.
 
-4) Single-frame sensitivity
-- Lighting, blur, camera angle, and clutter can reduce accuracy.
+4) No material chemistry understanding
+- Model cannot directly verify contamination, coating types, food residue level, etc.
 
-5) No material verification
-- The app cannot reliably detect contamination, coatings, food residue, local recyclability constraints, etc.
-
-6) Performance/resource cost
-- Transformer models can be heavy on CPU and memory.
-- First run downloads model weights and can be slow.
+5) Performance
+- Transformer models can be heavy on CPU/RAM.
+- First run may be slow due to model downloads.
 
 
-Ways to improve
----------------
-- Add a domain-specific waste classification model (or fine-tune one).
-- Add top-k display + user correction button to improve logs.
-- Use a confidence threshold and return "unsure" when low confidence.
-- Integrate location-aware disposal rules (zip/city specific policies).
-- Add batch analytics charts for trends over weeks/months.
-- Cache model downloads and optionally provide a lighter CPU model option.
+Ways to improve accuracy next
+-----------------------------
+- Add confidence threshold with "unsure" output when low confidence.
+- Add top-2/top-3 category display for human confirmation.
+- Add active-learning corrections (user override stored for fine-tuning set).
+- Fine-tune a domain-specific waste model on curated trash datasets.
+- Add optional location-aware disposal rules plugin for local compliance.
+- Benchmark multiple candidate models and keep per-category calibration.
 
 
 Operational notes
 -----------------
-- Requires camera permission for Python/Jupyter process.
-- Internet is needed on first run to download model weights.
-- All data is stored locally in this project directory.
+- Requires webcam permission for Python/Jupyter process.
+- Internet needed on first run to download model weights.
+- Data is stored locally in project files (SQLite DB).
 
